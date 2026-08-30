@@ -631,6 +631,9 @@ function loadImage() {
   if (!url) return;
   const genuinelyUnsaved = gcps.length > 0 && (!sb || hasUnsavedChanges);
   if (genuinelyUnsaved && !confirm(`Loading a new image will discard your ${gcps.length} unsaved control point${gcps.length !== 1 ? 's' : ''} for the current one. Continue?`)) return;
+  if (url.startsWith('http://') && location.protocol === 'https:') {
+    hintImg.textContent = '⚠ This is a plain-HTTP image on an HTTPS page — most browsers will block or silently fail this (mixed content). See the "Insecure content" site setting if it doesn\'t load.';
+  }
   imageUrl = url;
   currentSavedVersion = null;
   hasUnsavedChanges = false;

@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Georeferencer</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9/dist/leaflet-src.js"></script>
+<script src="https://unpkg.com/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Lato:wght@300;400&display=swap');
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#f0f4f8; --panel:#ffffff; --border:#cbd5e0; --accent:#3182ce;
+    --green:#276749; --red:#c53030; --text:#1a202c; --muted:#718096;
+    --mono:'Fira Code',monospace; --sans:'Lato',sans-serif;
+  }
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);height:100vh;display:flex;flex-direction:column;overflow:hidden;}
+
+  /* ── App header / tabs ── */
+  .app-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;}
+  .logo{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.12em;color:var(--accent);text-transform:uppercase;white-space:nowrap;border:1px solid var(--accent);padding:3px 8px;border-radius:2px;}
+  .tab-switch{display:flex;gap:4px;}
+  .tab-btn{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;border-radius:3px;cursor:pointer;border:1px solid var(--border);padding:5px 12px;background:transparent;color:var(--text);}
+  .tab-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .tab-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);}
+
+  button, label.upload-btn{font-family:var(--mono);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;border-radius:3px;cursor:pointer;border:1px solid var(--border);padding:5px 11px;background:transparent;color:var(--text);transition:all .14s;white-space:nowrap;display:inline-block;}
+  button:hover, label.upload-btn:hover{border-color:var(--accent);color:var(--accent);}
+  button.accent{background:var(--accent);color:#fff;border-color:var(--accent);}
+  button.accent:hover{background:#2b6cb0;}
+  button.danger{color:var(--red);border-color:var(--red);}
+  button.danger:hover{background:var(--red);color:#fff;}
+  button.active{background:var(--green);color:#fff;border-color:var(--green);}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  button:disabled:hover{border-color:var(--border);color:var(--text);}
+
+  /* ── Tab panels ── */
+  .tab-panel{display:none;flex-direction:column;flex:1;overflow:hidden;}
+  .tab-panel.active{display:flex;}
+
+  .subheader{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;min-height:44px;}
+  .url-row{flex:1;display:flex;gap:6px;min-width:220px;}
+  .url-row input{flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:5px 10px;border-radius:3px;outline:none;min-width:0;}
+  .url-row input:focus{border-color:var(--accent);}
+  .url-row input::placeholder{color:var(--muted);}
+
+  .slider-row{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--muted);}
+  .slider-row input[type=range]{width:90px;accent-color:var(--accent);}
+  .slider-row .val{width:32px;text-align:right;color:var(--text);}
+  .toggle-row{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--muted);}
+
+  #status{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;}
+  #status.ok{color:var(--green);}
+  #status.err{color:var(--red);}
+
+  /* ── Georef workspace ── */
+  .workspace{display:flex;flex:1;overflow:hidden;}
+  .pane{flex:1;position:relative;background:#e2e8f0;overflow:hidden;min-width:0;border-right:1px solid var(--border);}
+  #osd{width:100%;height:100%;}
+  #geo-map{width:100%;height:100%;}
+  #ann-svg{position:absolute;inset:0;pointer-events:none;overflow:visible;}
+
+  .pane-label{position:absolute;bottom:8px;left:8px;background:rgba(255,255,255,.92);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;padding:3px 9px;border-radius:2px;pointer-events:none;z-index:500;}
+  .hint-bar{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);background:rgba(255,255,255,.94);border:1px solid var(--border);color:var(--muted);font-family:var(--mono);font-size:9px;letter-spacing:.05em;padding:5px 14px;border-radius:20px;pointer-events:none;white-space:nowrap;z-index:500;max-width:90%;overflow:hidden;text-overflow:ellipsis;}
+  .loading-msg{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.06em;z-index:5;pointer-events:none;background:rgba(240,244,248,.7);}
+
+  .cp-panel{position:absolute;top:12px;right:12px;width:250px;max-height:calc(100% - 24px);background:var(--panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 3px 14px rgba(0,0,0,.14);z-index:600;display:flex;flex-direction:column;overflow:hidden;transition:width .15s;}
+  .cp-panel.collapsed{width:auto;}
+  .cp-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);cursor:pointer;user-select:none;flex-shrink:0;}
+  .cp-panel.collapsed .cp-panel-hdr{border-bottom:none;}
+  .cp-panel-hdr .chevron{transition:transform .15s;color:var(--muted);font-size:11px;}
+  .cp-panel.collapsed .cp-panel-hdr .chevron{transform:rotate(-90deg);}
+  .cp-panel-body{overflow-y:auto;flex:1;}
+  .cp-panel.collapsed .cp-panel-body,
+  .cp-panel.collapsed .cp-panel-footer{display:none;}
+  .cp-panel-footer{padding:8px 10px;border-top:1px solid var(--border);flex-shrink:0;}
+
+  .gcp-row{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--bg);font-family:var(--mono);font-size:10px;}
+  .gcp-row:hover{background:var(--bg);}
+  .gcp-num{width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0;}
+  .gcp-coords{flex:1;color:var(--muted);line-height:1.5;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+  .gcp-coords b{color:var(--text);font-weight:500;}
+  .gcp-del{background:none;border:none;color:var(--muted);font-size:13px;padding:2px 5px;cursor:pointer;letter-spacing:0;text-transform:none;}
+  .gcp-del:hover{color:var(--red);border:none;}
+  .cp-empty{padding:20px 14px;color:var(--muted);font-family:var(--mono);font-size:10px;line-height:1.6;}
+
+  /* ── Viewer ── */
+  .viewer-main{flex:1;position:relative;min-width:0;}
+  #view-map, #coverage-map{width:100%;height:100%;background:#e2e8f0;}
+  .empty-state{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:400;}
+  .empty-card{background:rgba(255,255,255,.95);border:1px solid var(--border);border-radius:6px;padding:20px 26px;font-family:var(--mono);font-size:11px;color:var(--muted);text-align:center;line-height:1.7;max-width:320px;}
+
+  .layer-panel{position:absolute;top:12px;right:12px;width:230px;max-height:calc(100% - 24px);background:var(--panel);border:1px solid var(--border);border-radius:6px;box-shadow:0 3px 14px rgba(0,0,0,.14);z-index:600;display:flex;flex-direction:column;overflow:hidden;transition:width .15s,height .15s;}
+  .layer-panel.collapsed{width:auto;}
+  .layer-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);cursor:pointer;user-select:none;flex-shrink:0;}
+  .layer-panel.collapsed .layer-panel-hdr{border-bottom:none;}
+  .layer-panel-hdr .chevron{transition:transform .15s;color:var(--muted);font-size:11px;}
+  .layer-panel.collapsed .layer-panel-hdr .chevron{transform:rotate(-90deg);}
+  .layer-panel-body{overflow-y:auto;flex:1;}
+  .layer-panel.collapsed .layer-panel-body,
+  .layer-panel.collapsed .layer-panel-footer{display:none;}
+  .layer-panel-footer{padding:8px 10px;border-top:1px solid var(--border);flex-shrink:0;}
+
+  .layer-row{display:flex;align-items:center;gap:7px;padding:7px 10px;border-bottom:1px solid var(--bg);font-family:var(--mono);font-size:10px;}
+  .layer-row:hover{background:var(--bg);}
+  .layer-row input[type=checkbox]{accent-color:var(--accent);flex-shrink:0;}
+  .layer-swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0;border:1.5px solid #fff;box-shadow:0 0 0 1px var(--border);}
+  .layer-info{flex:1;min-width:0;overflow:hidden;}
+  .layer-name{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .layer-rms{color:var(--muted);font-size:9px;}
+  .layer-del{background:none;border:none;color:var(--muted);font-size:13px;padding:2px 4px;cursor:pointer;letter-spacing:0;text-transform:none;flex-shrink:0;}
+  .layer-del:hover{color:var(--red);border:none;}
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">Georeferencer</div>
+  <div class="tab-switch">
+    <button class="tab-btn active" id="tab-btn-georef" onclick="switchTab('georef')">Georeference</button>
+    <button class="tab-btn" id="tab-btn-viewer" onclick="goToViewer()">Viewer</button>
+    <button class="tab-btn" id="tab-btn-coverage" onclick="switchTab('coverage')">Coverage</button>
+  </div>
+</header>
+
+<!-- ═══════════════════════ GEOREFERENCE TAB ═══════════════════════ -->
+<div class="tab-panel active" id="panel-georef">
+  <div class="subheader">
+    <div class="url-row">
+      <input id="url-in" type="text" placeholder="Plain image URL (JPG, PNG…)…" onkeydown="if(event.key==='Enter') loadImage()">
+      <button class="accent" onclick="loadImage()">Load</button>
+    </div>
+    <div class="tab-switch" id="geo-base-switch">
+      <button class="tab-btn active" id="geo-base-osm" onclick="setGeoBase('osm')">OSM</button>
+      <button class="tab-btn" id="geo-base-sat" onclick="setGeoBase('sat')">Satellite</button>
+    </div>
+    <div class="slider-row">Rotate image <input type="range" id="img-rotation" min="0" max="360" value="0" oninput="setImageRotation(this.value)"><span class="val" id="img-rotation-val">0°</span></div>
+    <button id="btn-add" onclick="togglePlacing()" disabled>+ Add Point</button>
+    <input type="file" accept=".json" id="ann-upload" style="display:none" onchange="importGcps(event)">
+    <button onclick="document.getElementById('ann-upload').click()">↑ Import</button>
+    <button id="btn-export" onclick="exportJSON()" disabled>Export JSON</button>
+    <button id="btn-view" class="accent" onclick="viewResult()" disabled>View Result →</button>
+    <button onclick="toggleFullscreen('panel-georef')" title="Fullscreen">⛶</button>
+    <span id="save-status" style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;"></span>
+    <button id="btn-copy-version" onclick="copyVersionLink()" style="display:none;" title="Copy a link to this exact saved version">🔗︎ Copy Version Link</button>
+    <span id="gcp-count" style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;"></span>
+  </div>
+
+  <div class="workspace">
+    <div class="pane" id="osd-pane">
+      <div id="osd"></div>
+      <svg id="ann-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="pane-label">Image</div>
+      <div class="loading-msg" id="loading-msg">Load an image above</div>
+      <div class="hint-bar" id="hint-bar-img">Load an image to begin</div>
+    </div>
+    <div class="pane" id="map-pane">
+      <div id="geo-map"></div>
+      <div class="pane-label">Map</div>
+      <div class="hint-bar" id="hint-bar-map"></div>
+      <div class="cp-panel" id="cp-panel">
+        <div class="cp-panel-hdr" onclick="toggleCpPanel()">
+          <span>Control Points <span id="sidebar-count"></span></span>
+          <span class="chevron">▾</span>
+        </div>
+        <div class="cp-panel-body" id="gcp-list">
+          <div class="cp-empty" id="gcp-empty">
+            Load an image, click <b>+ Add Point</b>, then click a spot on the image
+            followed by the matching spot on the map. Repeat for at least 3 points
+            (more is better, and helps correct paper distortion).
+          </div>
+        </div>
+        <div class="cp-panel-footer">
+          <button class="danger" onclick="clearAllGcps()">Clear all points</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ VIEWER TAB ═══════════════════════ -->
+<div class="tab-panel" id="panel-viewer">
+  <div class="subheader">
+    <label class="upload-btn" for="json-upload">↑ Upload Georeference JSON(s)</label>
+    <input type="file" accept=".json" id="json-upload" multiple style="display:none" onchange="loadViewerFiles(event)">
+    <select id="saved-select" onmousedown="populateSavedSelect()" onchange="if(this.value){loadVersionedRef(this.value);this.value='';}" style="font-family:var(--mono);font-size:10px;padding:5px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text);cursor:pointer;max-width:220px;">
+      <option value="">☁ Load Saved…</option>
+    </select>
+    <div class="url-row" style="flex:0 1 240px;">
+      <input id="version-url-in" type="text" placeholder="image_url@version…" onkeydown="if(event.key==='Enter') loadVersionedIntoViewer()">
+      <button onclick="loadVersionedIntoViewer()">Load</button>
+    </div>
+    <div class="tab-switch" id="view-base-switch">
+      <button class="tab-btn active" id="view-base-osm" onclick="setViewBase('osm')">OSM</button>
+      <button class="tab-btn" id="view-base-sat" onclick="setViewBase('sat')">Satellite</button>
+    </div>
+    <div class="slider-row">Opacity <input type="range" id="opacity" min="0" max="100" value="100" oninput="setViewerOpacity(this.value)"><span class="val" id="opacity-val">100%</span></div>
+    <div class="slider-row">Rotation <input type="range" id="rotation" min="0" max="360" value="0" oninput="setViewerRotation(this.value)"><span class="val" id="rotation-val">0°</span></div>
+    <div class="toggle-row"><input type="checkbox" id="show-pts" onchange="renderViewerMarkers()"><label for="show-pts">Show control points</label></div>
+    <button onclick="toggleFullscreen('panel-viewer')" title="Fullscreen">⛶</button>
+    <span id="status"></span>
+  </div>
+  <div class="viewer-main">
+    <div id="view-map"></div>
+    <div class="empty-state" id="empty-state">
+      <div class="empty-card">Georeference a map and click <b>View Result</b>,<br>or upload one or more Georeference Annotation JSON files here</div>
+    </div>
+    <div class="layer-panel" id="layer-panel" style="display:none;">
+      <div class="layer-panel-hdr" onclick="toggleLayerPanel()">
+        <span>Loaded Maps <span id="layer-count"></span></span>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="layer-panel-body" id="layer-list"></div>
+      <div class="layer-panel-footer">
+        <button class="danger" onclick="clearAllViewerMaps()">Remove all</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════ COVERAGE TAB ═══════════════════════ -->
+<div class="tab-panel" id="panel-coverage">
+  <div class="subheader">
+    <button class="accent" onclick="loadCoverage()">↻ Refresh</button>
+    <div class="slider-row">Site
+      <select id="coverage-site-filter" onchange="renderCoverage()" style="font-family:var(--mono);font-size:10px;padding:4px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text);cursor:pointer;">
+        <option value="">All sites</option>
+      </select>
+    </div>
+    <span id="coverage-status" style="font-family:var(--mono);font-size:10px;color:var(--muted);white-space:nowrap;"></span>
+  </div>
+  <div class="viewer-main">
+    <div id="coverage-map"></div>
+    <div class="empty-state" id="coverage-empty">
+      <div class="empty-card">Shows the outline of every georeferenced map saved to Supabase.<br>Click <b>Refresh</b> to load them.</div>
+    </div>
+    <div class="layer-panel" id="coverage-panel" style="display:none;">
+      <div class="layer-panel-hdr" onclick="document.getElementById('coverage-panel').classList.toggle('collapsed')">
+        <span>Georeferenced Maps <span id="coverage-count"></span></span>
+        <span class="chevron">▾</span>
+      </div>
+      <div class="layer-panel-body" id="coverage-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+window.addEventListener('beforeunload', e => {
+  if (gcps.length > 0 && (!sb || hasUnsavedChanges)) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+// ══════════════════════════ FULLSCREEN ══════════════════════════════════════
+function toggleFullscreen(panelId) {
+  const el = document.getElementById(panelId);
+  if (!document.fullscreenElement) {
+    el.requestFullscreen?.();
+  } else {
+    document.exitFullscreen?.();
+  }
+}
+document.addEventListener('fullscreenchange', () => {
+  setTimeout(() => {
+    if (geoMap) geoMap.invalidateSize();
+    if (viewMap) viewMap.invalidateSize();
+    if (viewer) { resizeSvg(); renderImageMarkers(); }
+  }, 60);
+});
+
+// ══════════════════════════ SUPABASE (optional) ═════════════════════════════
+// Fill these in from your Supabase project's Settings → API page to enable
+// auto-save. Left as-is, saving is silently disabled and everything else
+// works exactly as before (export/import still work locally).
+const SUPABASE_URL = 'https://sybszwaifcqjfyrtydco.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_2IezqJifJjQc6nOZcYPAgg_Ktrp4gSe';
+const sb = (SUPABASE_URL.startsWith('http') && typeof supabase !== 'undefined')
+  ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+// Writes require a signed-in session (see supabase-setup.sql) — this
+// happens automatically and invisibly, no login UI needed. Reads don't
+// need it, so reads (e.g. populateSavedSelect) don't wait on this.
+const authReady = sb ? sb.auth.signInAnonymously() : Promise.resolve();
+
+let autoSaveTimer = null;
+let currentSavedVersion = null;
+let hasUnsavedChanges = false;
+function scheduleAutoSave() {
+  hasUnsavedChanges = true;
+  if (!sb) return;
+  const statusEl = document.getElementById('save-status');
+  if (gcps.length < 3) { statusEl.textContent = ''; return; }
+  statusEl.textContent = '☁ saving…';
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(doAutoSave, 1500);
+}
+async function doAutoSave() {
+  const statusEl = document.getElementById('save-status');
+  const dims = getImageDims();
+  if (!sb || !dims || gcps.length < 3) return;
+  const { error: authError } = await authReady;
+  if (authError) { statusEl.textContent = '☁ sign-in failed: ' + authError.message; return; }
+  const name = (imageUrl.split('/').pop() || 'map');
+  try {
+    const { error } = await sb.from('annotations').upsert(
+      { image_url: imageUrl, name, data: buildExport(), updated_at: new Date().toISOString() },
+      { onConflict: 'image_url' }
+    );
+    if (error) { statusEl.textContent = '☁ save failed'; return; }
+    const { data: verRow } = await sb.from('annotations_history')
+      .select('version, changed_at').eq('image_url', imageUrl).order('version', { ascending: false }).limit(1).maybeSingle();
+    currentSavedVersion = verRow ? verRow.version : null;
+    hasUnsavedChanges = false;
+    const timeStr = verRow ? new Date(verRow.changed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+    statusEl.textContent = currentSavedVersion ? `☁ saved (v${currentSavedVersion}, ${timeStr})` : '☁ saved';
+    document.getElementById('btn-copy-version').style.display = currentSavedVersion ? 'inline-block' : 'none';
+  } catch (e) {
+    statusEl.textContent = '☁ save failed';
+  }
+}
+function copyVersionLink() {
+  if (!currentSavedVersion) return;
+  const ref = `${imageUrl}@${currentSavedVersion}`;
+  const link = `${location.origin}${location.pathname}?load=${encodeURIComponent(ref)}`;
+  navigator.clipboard.writeText(link).then(() => {
+    const statusEl = document.getElementById('save-status');
+    const prev = statusEl.textContent;
+    statusEl.textContent = '✓ link copied';
+    setTimeout(() => { statusEl.textContent = prev; }, 1500);
+  });
+}
+
+// ══════════════════════════ COVERAGE TAB ════════════════════════════════════
+let coverageMap = null;
+let coverageLayer = null;
+
+function initCoverageMap() {
+  if (coverageMap) return;
+  coverageMap = L.map('coverage-map', {}).setView([20, 0], 2);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(coverageMap);
+  coverageLayer = L.layerGroup().addTo(coverageMap);
+}
+
+// Filename only (last path segment), extension stripped, underscores as spaces.
+function titleFromUrl(url) {
+  try {
+    let t = url.replace(/\?.*$/, '').split('/').filter(Boolean).pop() || url;
+    t = t.replace(/\.(jpe?g|png|gif|webp|tiff?)$/i, '');
+    t = decodeURIComponent(t).replace(/_+/g, ' ').trim();
+    return t || url;
+  } catch (e) { return url; }
+}
+// Domain the map is hosted on, for filtering (e.g. "maps.mapywig.org", "upload.wikimedia.org").
+function siteFromUrl(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch (e) { return 'unknown'; }
+}
+
+function setCoverageStatus(msg, cls) {
+  const el = document.getElementById('coverage-status');
+  el.textContent = msg; el.className = cls || '';
+}
+
+let coverageRows = [];
+
+async function loadCoverage() {
+  if (!sb) { setCoverageStatus('⚠ Supabase is not configured', 'err'); return; }
+  try {
+    initCoverageMap();
+    setCoverageStatus('☁ loading…');
+    const { data, error } = await sb.from('annotations')
+      .select('name, image_url, data, updated_at').order('updated_at', { ascending: false });
+    if (error) { setCoverageStatus('⚠ ' + error.message, 'err'); return; }
+
+    coverageRows = [];
+    data.forEach(row => {
+      const src = row.data?.target?.source;
+      const features = row.data?.body?.features || [];
+      if (!src?.id || features.length < 3) return;
+      const gcps = features.map(f => ({
+        ix: f.properties.resourceCoords[0], iy: f.properties.resourceCoords[1],
+        lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
+      }));
+      let transform;
+      try { transform = fitPolynomial(gcps); } catch (e) { return; }
+      const toLatLng = (x, y) => { const [lon, lat] = transform.apply(x, y); return [lat, lon]; };
+      const corners = [toLatLng(0, 0), toLatLng(src.width, 0), toLatLng(src.width, src.height), toLatLng(0, src.height)];
+      coverageRows.push({
+        title: titleFromUrl(row.image_url), site: siteFromUrl(row.image_url),
+        url: row.image_url, updatedAt: row.updated_at, pointCount: features.length, corners
+      });
+    });
+
+    const sites = [...new Set(coverageRows.map(r => r.site))].sort();
+    const filterEl = document.getElementById('coverage-site-filter');
+    const prevSelection = filterEl.value;
+    filterEl.innerHTML = '<option value="">All sites</option>' +
+      sites.map(s => `<option value="${s}">${s}</option>`).join('');
+    filterEl.value = sites.includes(prevSelection) ? prevSelection : '';
+
+    renderCoverage();
+    setCoverageStatus(`✓ ${coverageRows.length} map${coverageRows.length !== 1 ? 's' : ''}`, 'ok');
+  } catch (err) {
+    console.error('loadCoverage failed:', err);
+    setCoverageStatus('⚠ ' + err.message, 'err');
+  }
+}
+
+function renderCoverage() {
+  if (!coverageLayer) return;
+  const site = document.getElementById('coverage-site-filter').value;
+  const rows = site ? coverageRows.filter(r => r.site === site) : coverageRows;
+
+  coverageLayer.clearLayers();
+  rows.forEach(r => {
+    const urlEsc = r.url.replace(/'/g, "\\'");
+    L.polygon(r.corners, { color: '#3182ce', weight: 2, fillOpacity: 0.15 })
+      .bindPopup(`<b>${r.title}</b><br><span style="color:#718096">${r.site}</span> · ${r.pointCount} points<br>
+        <button onclick="viewFromCoverage('${urlEsc}')">View</button>
+        <button onclick="editFromCoverage('${urlEsc}')">Edit</button>`)
+      .addTo(coverageLayer);
+  });
+
+  document.getElementById('coverage-empty').style.display = rows.length ? 'none' : 'flex';
+  document.getElementById('coverage-panel').style.display = rows.length ? 'flex' : 'none';
+  if (rows.length) coverageMap.fitBounds(L.latLngBounds(rows.flatMap(r => r.corners)), { padding: [30, 30] });
+
+  document.getElementById('coverage-count').textContent = rows.length ? `(${rows.length})` : '';
+  document.getElementById('coverage-list').innerHTML = rows.map(r => `
+    <div class="layer-row">
+      <div class="layer-info">
+        <div class="layer-name" title="${r.title}">${r.title}</div>
+        <div class="layer-rms">${r.site} · ${r.pointCount} pts · ${new Date(r.updatedAt).toLocaleDateString()}</div>
+      </div>
+      <button class="gcp-del" onclick="viewFromCoverage('${r.url.replace(/'/g, "\\'")}')" title="View">👁</button>
+      <button class="gcp-del" onclick="editFromCoverage('${r.url.replace(/'/g, "\\'")}')" title="Edit">✎</button>
+    </div>`).join('');
+}
+
+async function loadLatestInto(url) {
+  if (!sb || gcps.length > 0) return; // already populated (or user's started placing) — never append on top
+  const { data: row } = await sb.from('annotations').select('data').eq('image_url', url).maybeSingle();
+  if (!row || gcps.length > 0) return; // re-check: nothing arrived in the meantime while this was in flight
+  const features = row.data?.body?.features || [];
+  if (features.length < 3) return;
+  features.forEach(f => {
+    const [ix, iy] = f.properties.resourceCoords;
+    const [lon, lat] = f.geometry.coordinates;
+    gcps.push({ id: nextId++, ix, iy, lon, lat });
+  });
+  renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+  const enough = gcps.length >= 3;
+  btnExport.disabled = !enough; btnView.disabled = !enough;
+  if (gcps.length) geoMap.fitBounds(L.latLngBounds(gcps.map(g => [g.lat, g.lon])), { padding: [40, 40] });
+  hintImg.textContent = `✓ Loaded ${features.length} previously saved control points`;
+}
+
+function viewFromCoverage(url) {
+  switchTab('viewer');
+  loadVersionedRef(url);
+}
+function editFromCoverage(url) {
+  switchTab('georef');
+  document.getElementById('url-in').value = url;
+  loadImage();
+  // loadImage's own 'open' handler already fetches and populates the
+  // latest saved points for a plain (non-versioned) URL — nothing further
+  // needed here.
+}
+
+// ══════════════════════════ TAB SWITCHING ══════════════════════════════════
+function switchTab(name) {
+  document.getElementById('panel-georef').classList.toggle('active', name === 'georef');
+  document.getElementById('panel-viewer').classList.toggle('active', name === 'viewer');
+  document.getElementById('panel-coverage').classList.toggle('active', name === 'coverage');
+  document.getElementById('tab-btn-georef').classList.toggle('active', name === 'georef');
+  document.getElementById('tab-btn-viewer').classList.toggle('active', name === 'viewer');
+  document.getElementById('tab-btn-coverage').classList.toggle('active', name === 'coverage');
+  if (name === 'viewer') { initViewMap(); setTimeout(() => viewMap.invalidateSize(), 50); }
+  if (name === 'georef' && viewer) setTimeout(() => { resizeSvg(); renderImageMarkers(); }, 50);
+  if (name === 'coverage') {
+    initCoverageMap();
+    setTimeout(() => coverageMap.invalidateSize(), 50);
+    loadCoverage();
+  }
+}
+
+// ══════════════════════════ SHARED AFFINE HELPERS ══════════════════════════
+function solveN(A, b) {
+  const n = A.length;
+  const M = A.map((row, i) => [...row, b[i]]);
+  for (let i = 0; i < n; i++) {
+    let piv = i;
+    for (let k = i + 1; k < n; k++) if (Math.abs(M[k][i]) > Math.abs(M[piv][i])) piv = k;
+    [M[i], M[piv]] = [M[piv], M[i]];
+    const div = M[i][i];
+    if (Math.abs(div) < 1e-9) throw new Error('control points are too co-linear / clustered for this transform — try fewer terms or more spread-out points');
+    for (let j = i; j <= n; j++) M[i][j] /= div;
+    for (let k = 0; k < n; k++) {
+      if (k === i) continue;
+      const factor = M[k][i];
+      for (let j = i; j <= n; j++) M[k][j] -= factor * M[i][j];
+    }
+  }
+  return M.map(row => row[n]);
+}
+
+// order 1 = affine (3 terms: 1, x, y) — Allmaps' default polynomial order
+function polyBasis(x, y) { return [1, x, y]; }
+
+function fitPolynomial(gcps) {
+  const n = 3;
+  const A = Array.from({ length: n }, () => new Array(n).fill(0));
+  const bLon = new Array(n).fill(0), bLat = new Array(n).fill(0);
+  for (const g of gcps) {
+    const terms = polyBasis(g.ix, g.iy);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) A[i][j] += terms[i] * terms[j];
+      bLon[i] += terms[i] * g.lon;
+      bLat[i] += terms[i] * g.lat;
+    }
+  }
+  const coeffLon = solveN(A, bLon);
+  const coeffLat = solveN(A, bLat);
+  return {
+    method: 'polynomial',
+    apply: (x, y) => {
+      const terms = polyBasis(x, y);
+      let lon = 0, lat = 0;
+      for (let i = 0; i < n; i++) { lon += coeffLon[i] * terms[i]; lat += coeffLat[i] * terms[i]; }
+      return [lon, lat];
+    }
+  };
+}
+
+function fitTransform(gcps) {
+  return fitPolynomial(gcps);
+}
+function rmsErrorMeters(gcps, tf) {
+  let sumSq = 0;
+  for (const g of gcps) {
+    const [lon, lat] = tf.apply(g.ix, g.iy);
+    const dLat = (lat - g.lat) * 110540;
+    const dLon = (lon - g.lon) * 111320 * Math.cos(g.lat * Math.PI / 180);
+    sumSq += dLat*dLat + dLon*dLon;
+  }
+  return Math.sqrt(sumSq / gcps.length);
+}
+function uuid() {
+  return crypto.randomUUID ? crypto.randomUUID() :
+    'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+}
+// Parses the Allmaps-style "url@version" convention. Trailing "@<digits>"
+// is treated as a version marker; anything else (including a bare URL) is
+// passed through unchanged with version: null (meaning "latest").
+function parseVersionedUrl(raw) {
+  const m = raw.match(/^(.*)@(\d+)$/);
+  return m ? { url: m[1], version: parseInt(m[2], 10) } : { url: raw, version: null };
+}
+
+// ══════════════════════════ GEOREFERENCE TAB ════════════════════════════════
+let viewer = null;
+let geoMap = null;
+let gcps = [];
+let nextId = 1;
+let placing = false;
+let pendingImgPt = null;
+let imgDragId = null; // id of the control point currently being dragged on the image pane
+let imageUrl = '';
+let geoMarkerLayer = null;
+
+const osdEl = document.getElementById('osd');
+const annSvg = document.getElementById('ann-svg');
+const loadingMsg = document.getElementById('loading-msg');
+const hintImg = document.getElementById('hint-bar-img');
+const hintMap = document.getElementById('hint-bar-map');
+const btnAdd = document.getElementById('btn-add');
+const btnExport = document.getElementById('btn-export');
+const btnView = document.getElementById('btn-view');
+
+let geoOsmLayer = null, geoSatLayer = null;
+
+function initGeoMap() {
+  if (geoMap) return;
+  geoMap = L.map('geo-map', { zoomControl: true }).setView([54.5, -3], 6);
+  geoOsmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(geoMap);
+  geoSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Tiles &copy; Esri'
+  });
+  geoMarkerLayer = L.layerGroup().addTo(geoMap);
+  geoMap.on('click', onGeoMapClick);
+  geoMap.on('move zoom', renderGeoMapMarkers);
+  centerOnUserLocation(geoMap);
+}
+
+function centerOnUserLocation(mapInstance) {
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    pos => mapInstance.setView([pos.coords.latitude, pos.coords.longitude], 11),
+    () => {}, // denied/unavailable — keep the default view, no error shown
+    { timeout: 5000, maximumAge: 600000 }
+  );
+}
+function setGeoBase(which) {
+  document.getElementById('geo-base-osm').classList.toggle('active', which === 'osm');
+  document.getElementById('geo-base-sat').classList.toggle('active', which === 'sat');
+  if (which === 'osm') { geoMap.removeLayer(geoSatLayer); geoOsmLayer.addTo(geoMap); }
+  else { geoMap.removeLayer(geoOsmLayer); geoSatLayer.addTo(geoMap); }
+}
+function setImageRotation(deg) {
+  document.getElementById('img-rotation-val').textContent = deg + '°';
+  if (viewer) { viewer.viewport.setRotation(+deg, false); renderImageMarkers(); }
+}
+
+function loadImage() {
+  const raw = document.getElementById('url-in').value.trim();
+  if (!raw) return;
+  const { url, version: requestedVersion } = parseVersionedUrl(raw);
+  if (!url) return;
+  const genuinelyUnsaved = gcps.length > 0 && (!sb || hasUnsavedChanges);
+  if (genuinelyUnsaved && !confirm(`Loading a new image will discard your ${gcps.length} unsaved control point${gcps.length !== 1 ? 's' : ''} for the current one. Continue?`)) return;
+  imageUrl = url;
+  currentSavedVersion = null;
+  hasUnsavedChanges = false;
+  document.getElementById('btn-copy-version').style.display = 'none';
+  loadingMsg.style.display = 'flex';
+  loadingMsg.textContent = 'Loading…';
+  if (viewer) { try { viewer.destroy(); } catch (e) {} viewer = null; }
+  annSvg.innerHTML = '';
+  gcps = []; nextId = 1; pendingImgPt = null; placing = false;
+  updateGcpList(); updateCounts();
+  renderGeoMapMarkers();
+  document.getElementById('img-rotation').value = 0;
+  document.getElementById('img-rotation-val').textContent = '0°';
+  btnAdd.classList.remove('active'); btnAdd.disabled = true;
+  btnExport.disabled = true; btnView.disabled = true;
+  initGeoMap();
+
+  viewer = OpenSeadragon({
+    element: osdEl,
+    tileSources: { type: 'image', url },
+    showNavigationControl: false,
+    animationTime: 0.2,
+    visibilityRatio: 0.1,
+    minZoomLevel: 0.02,
+    maxZoomLevel: 50,
+    gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: true },
+    backgroundColor: '#e2e8f0',
+  });
+
+  viewer.addHandler('open', () => {
+    loadingMsg.style.display = 'none';
+    btnAdd.disabled = false;
+    hintImg.textContent = 'Click "+ Add Point" to start placing control points';
+    resizeSvg(); renderImageMarkers();
+    if (requestedVersion != null) loadVersionInto(url, requestedVersion);
+    else loadLatestInto(url);
+  });
+  viewer.addHandler('open-failed', () => {
+    loadingMsg.style.display = 'flex';
+    loadingMsg.textContent = '⚠ Failed to load — check the URL and that it allows cross-origin access';
+  });
+  viewer.addHandler('update-viewport', renderImageMarkers);
+  viewer.addHandler('rotate', renderImageMarkers);
+  viewer.addHandler('resize', () => { resizeSvg(); renderImageMarkers(); });
+  viewer.addHandler('canvas-click', onCanvasClick);
+}
+
+function resizeSvg() {
+  const w = osdEl.clientWidth, h = osdEl.clientHeight;
+  annSvg.setAttribute('width', w);
+  annSvg.setAttribute('height', h);
+  annSvg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+}
+function getImageDims() {
+  const item = viewer && viewer.world.getItemAt(0);
+  if (!item) return null;
+  const d = item.source.dimensions;
+  return { width: Math.round(d.x), height: Math.round(d.y) };
+}
+function i2s(ix, iy) {
+  const item = viewer?.world?.getItemAt(0);
+  if (!item) return { x: 0, y: 0 };
+  const vp = item.imageToViewportCoordinates(ix, iy);
+  const win = viewer.viewport.viewportToWindowCoordinates(vp);
+  const r = osdEl.getBoundingClientRect();
+  return { x: win.x - r.left, y: win.y - r.top };
+}
+function s2i(sx, sy) {
+  const item = viewer?.world?.getItemAt(0);
+  if (!item) return { x: 0, y: 0 };
+  const r = osdEl.getBoundingClientRect();
+  const vp = viewer.viewport.windowToViewportCoordinates(new OpenSeadragon.Point(sx + r.left, sy + r.top));
+  return item.viewportToImageCoordinates(vp);
+}
+
+function togglePlacing() {
+  placing = !placing;
+  btnAdd.classList.toggle('active', placing);
+  pendingImgPt = null;
+  hintImg.textContent = placing ? 'Click a point on the image' : 'Not placing — click "+ Add Point" to resume';
+  hintMap.textContent = '';
+  renderImageMarkers();
+}
+function onCanvasClick(event) {
+  if (!placing || pendingImgPt) return;
+  event.preventDefaultAction = true;
+  const pos = event.position;
+  const ipt = s2i(pos.x, pos.y);
+  pendingImgPt = { x: ipt.x, y: ipt.y };
+  hintImg.textContent = `Point set at (${Math.round(ipt.x)}, ${Math.round(ipt.y)}) — now click the same spot on the map →`;
+  hintMap.textContent = 'Click the matching location on the map';
+  renderImageMarkers();
+}
+function onGeoMapClick(e) {
+  if (!placing || !pendingImgPt) return;
+  addGcp(pendingImgPt.x, pendingImgPt.y, e.latlng.lng, e.latlng.lat);
+  pendingImgPt = null;
+  hintImg.textContent = 'Click the next point on the image';
+  hintMap.textContent = '';
+}
+
+function addGcp(ix, iy, lon, lat) {
+  gcps.push({ id: nextId++, ix, iy, lon, lat });
+  renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+  const enough = gcps.length >= 3;
+  btnExport.disabled = !enough; btnView.disabled = !enough;
+}
+function removeGcp(id) {
+  gcps = gcps.filter(g => g.id !== id);
+  renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+  const enough = gcps.length >= 3;
+  btnExport.disabled = !enough; btnView.disabled = !enough;
+}
+function clearAllGcps() {
+  if (gcps.length && !confirm('Remove all control points?')) return;
+  gcps = []; pendingImgPt = null;
+  renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+  btnExport.disabled = true; btnView.disabled = true;
+}
+function updateCounts() {
+  const n = gcps.length;
+  document.getElementById('gcp-count').textContent = n ? `${n} point${n !== 1 ? 's' : ''}` : '';
+  document.getElementById('sidebar-count').textContent = n ? `(${n})` : '';
+  scheduleAutoSave();
+}
+function toggleCpPanel() {
+  document.getElementById('cp-panel').classList.toggle('collapsed');
+}
+function updateGcpList() {
+  const list = document.getElementById('gcp-list');
+  if (!gcps.length) {
+    list.innerHTML = `<div class="cp-empty" id="gcp-empty">Load an image, click <b>+ Add Point</b>, then click a spot on the image
+      followed by the matching spot on the map. Repeat for at least 3 points
+      (more is better, and helps correct paper distortion).</div>`;
+    return;
+  }
+  list.innerHTML = gcps.map((g, i) => `
+    <div class="gcp-row">
+      <div class="gcp-num">${i + 1}</div>
+      <div class="gcp-coords">img <b>${Math.round(g.ix)},${Math.round(g.iy)}</b><br>map <b>${g.lat.toFixed(5)},${g.lon.toFixed(5)}</b></div>
+      <button class="gcp-del" onclick="removeGcp(${g.id})" title="Remove">✕</button>
+    </div>`).join('');
+}
+
+function renderImageMarkers() {
+  if (!viewer || !viewer.world.getItemAt(0)) return;
+  const NS = 'http://www.w3.org/2000/svg';
+  annSvg.innerHTML = '';
+  gcps.forEach((g, i) => {
+    const p = i2s(g.ix, g.iy);
+    annSvg.appendChild(marker(NS, p.x, p.y, i + 1, '#3182ce', g.id));
+  });
+  if (pendingImgPt) {
+    const p = i2s(pendingImgPt.x, pendingImgPt.y);
+    const c = document.createElementNS(NS, 'circle');
+    c.setAttribute('cx', p.x); c.setAttribute('cy', p.y); c.setAttribute('r', 9);
+    c.setAttribute('fill', 'none'); c.setAttribute('stroke', '#c53030');
+    c.setAttribute('stroke-width', 2); c.setAttribute('stroke-dasharray', '3 3');
+    annSvg.appendChild(c);
+  }
+}
+function marker(NS, x, y, num, color, id) {
+  const g = document.createElementNS(NS, 'g');
+  const c = document.createElementNS(NS, 'circle');
+  c.setAttribute('cx', x); c.setAttribute('cy', y); c.setAttribute('r', 9);
+  c.setAttribute('fill', color); c.setAttribute('stroke', '#fff'); c.setAttribute('stroke-width', 2);
+  c.style.pointerEvents = 'all';
+  c.style.cursor = 'move';
+  c.addEventListener('mousedown', ev => {
+    ev.stopPropagation(); ev.preventDefault();
+    imgDragId = id;
+  });
+  const t = document.createElementNS(NS, 'text');
+  t.setAttribute('x', x); t.setAttribute('y', y + 3.5); t.setAttribute('text-anchor', 'middle');
+  t.setAttribute('font-size', '10'); t.setAttribute('font-family', 'Fira Code,monospace');
+  t.setAttribute('fill', '#fff'); t.textContent = num;
+  t.style.pointerEvents = 'none';
+  g.appendChild(c); g.appendChild(t);
+  return g;
+}
+window.addEventListener('mousemove', e => {
+  if (imgDragId == null || !viewer) return;
+  const r = osdEl.getBoundingClientRect();
+  const pt = s2i(e.clientX - r.left, e.clientY - r.top);
+  const g = gcps.find(x => x.id === imgDragId);
+  if (g) { g.ix = pt.x; g.iy = pt.y; renderImageMarkers(); updateGcpList(); scheduleAutoSave(); }
+});
+window.addEventListener('mouseup', () => { imgDragId = null; });
+function renderGeoMapMarkers() {
+  if (!geoMarkerLayer) return;
+  geoMarkerLayer.clearLayers();
+  gcps.forEach((g, i) => {
+    const mk = L.marker([g.lat, g.lon], {
+      draggable: true,
+      icon: L.divIcon({
+        className: '', html: `<div style="background:#3182ce;color:#fff;border:2px solid #fff;border-radius:50%;width:18px;height:18px;display:flex;align-items:center;justify-content:center;font-family:'Fira Code',monospace;font-size:10px;box-shadow:0 1px 3px rgba(0,0,0,.3);cursor:move;">${i + 1}</div>`,
+        iconSize: [18, 18], iconAnchor: [9, 9]
+      })
+    }).addTo(geoMarkerLayer);
+    mk.on('drag', e => {
+      const ll = e.target.getLatLng();
+      g.lat = ll.lat; g.lon = ll.lng;
+      updateGcpList();
+      scheduleAutoSave();
+    });
+  });
+}
+
+function buildExport() {
+  const dims = getImageDims() || { width: null, height: null };
+  return {
+    '@context': ['http://www.w3.org/ns/anno.jsonld', 'http://iiif.io/api/extension/georef/1/context.json'],
+    id: `urn:uuid:${uuid()}`,
+    type: 'Annotation',
+    motivation: 'georeferencing',
+    target: {
+      type: 'SpecificResource',
+      source: { id: imageUrl, type: 'Image', width: dims.width, height: dims.height }
+    },
+    body: {
+      type: 'FeatureCollection',
+      transformation: { type: 'polynomial', options: { order: 1 } },
+      features: gcps.map(g => ({
+        type: 'Feature',
+        properties: { resourceCoords: [Math.round(g.ix * 100) / 100, Math.round(g.iy * 100) / 100] },
+        geometry: { type: 'Point', coordinates: [g.lon, g.lat] }
+      }))
+    }
+  };
+}
+function exportJSON() {
+  const blob = new Blob([JSON.stringify(buildExport(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const name = (imageUrl.split('/').pop() || 'map').replace(/\.[^.]+$/, '');
+  a.download = `${name}.georef.json`;
+  a.click();
+}
+
+async function loadVersionInto(url, version) {
+  if (!sb) { hintImg.textContent = '⚠ Supabase is not configured — cannot load a versioned reference'; return; }
+  if (gcps.length > 0) return; // already populated — never append on top
+  hintImg.textContent = `Loading version ${version}…`;
+  const { data: row, error } = await sb.from('annotations_history')
+    .select('data, changed_at').eq('image_url', url).eq('version', version).maybeSingle();
+  if (error || !row) { hintImg.textContent = `⚠ Version ${version} not found for this image`; return; }
+  if (gcps.length > 0) return; // re-check: nothing arrived in the meantime while this was in flight
+  const features = row.data?.body?.features || [];
+  features.forEach(f => {
+    const [ix, iy] = f.properties.resourceCoords;
+    const [lon, lat] = f.geometry.coordinates;
+    gcps.push({ id: nextId++, ix, iy, lon, lat });
+  });
+  renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+  const enough = gcps.length >= 3;
+  btnExport.disabled = !enough; btnView.disabled = !enough;
+  if (gcps.length) geoMap.fitBounds(L.latLngBounds(gcps.map(g => [g.lat, g.lon])), { padding: [40, 40] });
+  const when = new Date(row.changed_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  hintImg.textContent = `✓ Loaded version ${version} from ${when} (${features.length} points) — continuing to edit will save as a new version`;
+}
+
+async function importGcps(event) {
+  const file = event.target.files[0]; if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    const src = data.target?.source?.id;
+    if (!src) throw new Error('No target.source.id found');
+    document.getElementById('url-in').value = src;
+    loadImage();
+    await new Promise((resolve, reject) => {
+      viewer.addOnceHandler('open', resolve);
+      viewer.addOnceHandler('open-failed', () => reject(new Error('the image failed to load')));
+    });
+    const features = data.body?.features || [];
+    features.forEach(f => {
+      const [ix, iy] = f.properties.resourceCoords;
+      const [lon, lat] = f.geometry.coordinates;
+      gcps.push({ id: nextId++, ix, iy, lon, lat });
+    });
+    renderImageMarkers(); renderGeoMapMarkers(); updateGcpList(); updateCounts();
+    const enough = gcps.length >= 3;
+    btnExport.disabled = !enough; btnView.disabled = !enough;
+    if (gcps.length) geoMap.fitBounds(L.latLngBounds(gcps.map(g => [g.lat, g.lon])), { padding: [40, 40] });
+    hintImg.textContent = `✓ Imported ${features.length} control point${features.length !== 1 ? 's' : ''}`;
+  } catch (err) {
+    alert('Could not parse this file as a Georeference Annotation: ' + err.message);
+  }
+  event.target.value = '';
+}
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'Escape' && placing) togglePlacing();
+});
+
+// ══════════════════════════ VIEWER TAB (multi-map) ══════════════════════════
+let viewMap = null;
+let viewOpacity = 1;
+let viewMapId = 1;
+const LAYER_COLORS = ['#c53030', '#3182ce', '#276749', '#b7791f', '#805ad5', '#c05621', '#0987a0', '#97266d'];
+
+// Each entry: {id, name, gcps, corners, naturalW, naturalH, imgEl, markers:[L.Marker], visible, color, rms}
+let viewMaps = [];
+
+let viewOsmLayer = null, viewSatLayer = null;
+
+function initViewMap() {
+  if (viewMap) return;
+  viewMap = L.map('view-map', { rotate: true, rotateControl: false }).setView([54.5, -3], 6);
+  viewOsmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(viewMap);
+  viewSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19, attribution: 'Tiles &copy; Esri'
+  });
+  viewMap.on('move zoom rotate', () => viewMaps.forEach(m => m.visible && m.reposition && m.reposition()));
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      pos => { if (!viewMaps.length) viewMap.setView([pos.coords.latitude, pos.coords.longitude], 11); },
+      () => {},
+      { timeout: 5000, maximumAge: 600000 }
+    );
+  }
+}
+function setViewBase(which) {
+  document.getElementById('view-base-osm').classList.toggle('active', which === 'osm');
+  document.getElementById('view-base-sat').classList.toggle('active', which === 'sat');
+  if (which === 'osm') { viewMap.removeLayer(viewSatLayer); viewOsmLayer.addTo(viewMap); }
+  else { viewMap.removeLayer(viewOsmLayer); viewSatLayer.addTo(viewMap); }
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg; el.className = cls || '';
+}
+
+function addViewerMap(name, imgUrl, width, height, gcpList) {
+  initViewMap();
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('layer-panel').style.display = 'flex';
+
+  let transform;
+  try { transform = fitTransform(gcpList); }
+  catch (e) { setStatus('⚠ ' + name + ': ' + e.message, 'err'); return; }
+
+  const toLL = (x, y) => { const [lon, lat] = transform.apply(x, y); return L.latLng(lat, lon); };
+  const corners = { topLeft: toLL(0, 0), topRight: toLL(width, 0), bottomLeft: toLL(0, height) };
+  const bottomRight = toLL(width, height);
+  const rms = rmsErrorMeters(gcpList, transform);
+
+  // If this exact image is already a layer here, replace it in place rather
+  // than stacking a duplicate — e.g. re-visiting "View Result" after tweaking
+  // points on the same map should update it, not add another copy.
+  const existingIdx = viewMaps.findIndex(m => m.url === imgUrl);
+  let color = LAYER_COLORS[viewMaps.length % LAYER_COLORS.length];
+  if (existingIdx !== -1) {
+    const old = viewMaps[existingIdx];
+    if (old.imgEl) old.imgEl.remove();
+    old.markers.forEach(mk => viewMap.removeLayer(mk));
+    color = old.color;
+    viewMaps.splice(existingIdx, 1);
+  }
+
+  const entry = {
+    id: viewMapId++, name, url: imgUrl, gcps: gcpList, corners, naturalW: width, naturalH: height,
+    imgEl: null, markers: [], visible: true, color, rms
+  };
+  viewMaps.push(entry);
+
+  const probe = new Image();
+  probe.onload = () => {
+    placeWarpedImage(entry, imgUrl, probe.naturalWidth || width, probe.naturalHeight || height);
+    fitToVisible();
+    renderViewerMarkers();
+    updateLayerList();
+    setStatus(`✓ ${viewMaps.length} map${viewMaps.length !== 1 ? 's' : ''} loaded`, 'ok');
+  };
+  probe.onerror = () => {
+    setStatus('⚠ ' + name + ': image failed to load (network error or the server blocked the request)', 'err');
+    updateLayerList();
+  };
+  probe.src = imgUrl;
+
+  updateLayerList();
+}
+
+function placeWarpedImage(entry, url, naturalW, naturalH) {
+  const img = L.DomUtil.create('img', '', viewMap.getPane('overlayPane'));
+  img.src = url;
+  img.style.position = 'absolute';
+  img.style.left = '0'; img.style.top = '0';
+  img.style.transformOrigin = '0 0';
+  img.style.width = naturalW + 'px';
+  img.style.height = naturalH + 'px';
+  img.style.opacity = viewOpacity;
+  img.style.pointerEvents = 'none';
+  img.style.display = entry.visible ? '' : 'none';
+  entry.imgEl = img;
+  entry.naturalW = naturalW; entry.naturalH = naturalH;
+
+  entry.reposition = () => {
+    const tl = viewMap.latLngToLayerPoint(entry.corners.topLeft);
+    const tr = viewMap.latLngToLayerPoint(entry.corners.topRight);
+    const bl = viewMap.latLngToLayerPoint(entry.corners.bottomLeft);
+    const a = (tr.x - tl.x) / naturalW, b = (tr.y - tl.y) / naturalW;
+    const c = (bl.x - tl.x) / naturalH, d = (bl.y - tl.y) / naturalH;
+    img.style.transform = `matrix(${a},${b},${c},${d},${tl.x},${tl.y})`;
+  };
+  entry.reposition();
+}
+
+function fitToVisible() {
+  const visible = viewMaps.filter(m => m.visible && m.corners);
+  if (!visible.length) return;
+  const pts = [];
+  visible.forEach(m => {
+    const br = L.latLng(
+      m.corners.bottomLeft.lat + (m.corners.topRight.lat - m.corners.topLeft.lat),
+      m.corners.topRight.lng + (m.corners.bottomLeft.lng - m.corners.topLeft.lng)
+    );
+    pts.push(m.corners.topLeft, m.corners.topRight, m.corners.bottomLeft, br);
+  });
+  viewMap.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+}
+
+function renderViewerMarkers() {
+  const show = document.getElementById('show-pts').checked;
+  viewMaps.forEach(entry => {
+    entry.markers.forEach(mk => viewMap.removeLayer(mk));
+    entry.markers = [];
+    if (!show || !entry.visible) return;
+    entry.gcps.forEach((g, i) => {
+      const mk = L.marker([g.lat, g.lon], {
+        icon: L.divIcon({
+          className: '', html: `<div style="background:${entry.color};color:#fff;border:2px solid #fff;border-radius:50%;width:16px;height:16px;display:flex;align-items:center;justify-content:center;font-family:'Fira Code',monospace;font-size:9px;box-shadow:0 1px 3px rgba(0,0,0,.3)">${i + 1}</div>`,
+          iconSize: [16, 16], iconAnchor: [8, 8]
+        })
+      }).addTo(viewMap);
+      entry.markers.push(mk);
+    });
+  });
+}
+
+function toggleLayerPanel() {
+  document.getElementById('layer-panel').classList.toggle('collapsed');
+}
+
+function updateLayerList() {
+  const list = document.getElementById('layer-list');
+  document.getElementById('layer-count').textContent = viewMaps.length ? `(${viewMaps.length})` : '';
+  list.innerHTML = viewMaps.map(m => `
+    <div class="layer-row">
+      <input type="checkbox" ${m.visible ? 'checked' : ''} onchange="toggleViewerMap(${m.id})">
+      <div class="layer-swatch" style="background:${m.color}"></div>
+      <div class="layer-info">
+        <div class="layer-name" title="${m.name}">${m.name}</div>
+        <div class="layer-rms">${m.rms != null ? '± ' + m.rms.toFixed(1) + ' m' : 'loading…'}</div>
+      </div>
+      <button class="layer-del" onclick="copyViewerMapLink('${m.url.replace(/'/g, "\\'")}')" title="Copy link to this map">🔗︎</button>
+      <button class="layer-del" onclick="editFromCoverage('${m.url.replace(/'/g, "\\'")}')" title="Edit">✎</button>
+      <button class="layer-del" onclick="removeViewerMap(${m.id})" title="Remove">✕</button>
+    </div>`).join('');
+}
+
+function toggleViewerMap(id) {
+  const m = viewMaps.find(x => x.id === id); if (!m) return;
+  m.visible = !m.visible;
+  if (m.imgEl) m.imgEl.style.display = m.visible ? '' : 'none';
+  renderViewerMarkers();
+}
+
+function removeViewerMap(id) {
+  const m = viewMaps.find(x => x.id === id); if (!m) return;
+  if (m.imgEl) m.imgEl.remove();
+  m.markers.forEach(mk => viewMap.removeLayer(mk));
+  viewMaps = viewMaps.filter(x => x.id !== id);
+  updateLayerList();
+  if (!viewMaps.length) {
+    document.getElementById('layer-panel').style.display = 'none';
+    document.getElementById('empty-state').style.display = 'flex';
+    setStatus('', '');
+  }
+}
+
+function clearAllViewerMaps() {
+  if (viewMaps.length && !confirm('Remove all loaded maps?')) return;
+  viewMaps.forEach(m => { if (m.imgEl) m.imgEl.remove(); m.markers.forEach(mk => viewMap.removeLayer(mk)); });
+  viewMaps = [];
+  updateLayerList();
+  document.getElementById('layer-panel').style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+  setStatus('', '');
+}
+
+function pushCurrentToViewer() {
+  const dims = getImageDims();
+  if (!dims || gcps.length < 3) return false;
+  const name = (imageUrl.split('/').pop() || 'map');
+  setTimeout(() => addViewerMap(name, imageUrl, dims.width, dims.height, gcps), 60);
+  return true;
+}
+function viewResult() {
+  switchTab('viewer');
+  pushCurrentToViewer();
+}
+function goToViewer() {
+  switchTab('viewer');
+  // First time only: if nothing's been sent to the viewer yet and there's a
+  // ready result on the georeference tab, show it automatically. Once
+  // anything's been loaded (via this or an upload), plain tab switches
+  // stop auto-pushing, so re-visiting doesn't pile up duplicate entries.
+  if (viewMaps.length === 0) pushCurrentToViewer();
+}
+
+function copyViewerMapLink(url) {
+  const link = `${location.origin}${location.pathname}?view=${encodeURIComponent(url)}`;
+  navigator.clipboard.writeText(link).then(() => {
+    setStatus('✓ link copied', 'ok');
+  });
+}
+
+async function loadVersionedRef(raw) {
+  if (!sb) { setStatus('⚠ Supabase is not configured', 'err'); return; }
+  const { url, version } = parseVersionedUrl(raw);
+  setStatus('☁ loading…');
+  let row, error;
+  if (version != null) {
+    ({ data: row, error } = await sb.from('annotations_history').select('name, data').eq('image_url', url).eq('version', version).maybeSingle());
+  } else {
+    ({ data: row, error } = await sb.from('annotations').select('name, data').eq('image_url', url).maybeSingle());
+  }
+  if (error || !row) { setStatus(`⚠ Not found: ${raw}`, 'err'); return; }
+  const src = row.data?.target?.source;
+  const features = row.data?.body?.features || [];
+  if (!src?.id || features.length < 3) { setStatus('⚠ Saved data is incomplete', 'err'); return; }
+  const list = features.map(f => ({
+    ix: f.properties.resourceCoords[0], iy: f.properties.resourceCoords[1],
+    lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
+  }));
+  addViewerMap((row.name || 'map') + (version != null ? ` @${version}` : ''), src.id, src.width, src.height, list);
+}
+function loadVersionedIntoViewer() {
+  const input = document.getElementById('version-url-in');
+  const raw = input.value.trim();
+  if (raw) { loadVersionedRef(raw); input.value = ''; }
+}
+
+async function populateSavedSelect() {
+  if (!sb) { setStatus('⚠ Supabase is not configured', 'err'); return; }
+  const sel = document.getElementById('saved-select');
+  const { data, error } = await sb.from('annotations')
+    .select('name, image_url').order('updated_at', { ascending: false });
+  if (error) { setStatus('⚠ ' + error.message, 'err'); return; }
+  sel.innerHTML = '<option value="">☁ Load Saved…</option>' +
+    data.map(r => `<option value="${r.image_url.replace(/"/g, '&quot;')}">${(r.name || r.image_url).replace(/</g, '&lt;')}</option>`).join('');
+}
+
+async function loadViewerFiles(event) {
+  const files = Array.from(event.target.files || []);
+  for (const file of files) {
+    try {
+      const data = JSON.parse(await file.text());
+      const src = data.target?.source;
+      if (!src?.id) throw new Error('No target.source.id found');
+      const features = data.body?.features || [];
+      if (features.length < 3) throw new Error(`Need at least 3 control points (found ${features.length})`);
+      const list = features.map(f => ({
+        ix: f.properties.resourceCoords[0], iy: f.properties.resourceCoords[1],
+        lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1]
+      }));
+      addViewerMap(file.name.replace(/\.json$/i, ''), src.id, src.width, src.height, list);
+    } catch (err) {
+      setStatus('⚠ ' + file.name + ': ' + err.message, 'err');
+    }
+  }
+  event.target.value = '';
+}
+
+function setViewerOpacity(val) {
+  viewOpacity = val / 100;
+  document.getElementById('opacity-val').textContent = val + '%';
+  viewMaps.forEach(m => { if (m.imgEl) m.imgEl.style.opacity = viewOpacity; });
+}
+function setViewerRotation(deg) {
+  document.getElementById('rotation-val').textContent = deg + '°';
+  if (viewMap && typeof viewMap.setBearing === 'function') viewMap.setBearing(+deg);
+}
+
+initGeoMap();
+
+// A URL like yoursite.html?load=<encoded url@version> auto-loads that
+// reference on open — this is what makes "Copy Version Link" produce a
+// real clickable/shareable link rather than just text to paste manually.
+const preload = new URLSearchParams(location.search).get('load');
+if (preload) {
+  document.getElementById('url-in').value = preload;
+  loadImage();
+}
+const preloadView = new URLSearchParams(location.search).get('view');
+if (preloadView) {
+  switchTab('viewer');
+  loadVersionedRef(preloadView);
+}
+if (preload || preloadView) {
+  history.replaceState({}, '', location.pathname);
+}
+</script>
+</body>
+</html>

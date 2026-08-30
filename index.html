@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer">
 <title>Georeferencer</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9/dist/leaflet.css">
@@ -1000,6 +1001,7 @@ function addViewerMap(name, imgUrl, width, height, gcpList) {
   viewMaps.push(entry);
 
   const probe = new Image();
+  probe.referrerPolicy = 'no-referrer';
   probe.onload = () => {
     placeWarpedImage(entry, imgUrl, probe.naturalWidth || width, probe.naturalHeight || height);
     fitToVisible();
@@ -1018,6 +1020,7 @@ function addViewerMap(name, imgUrl, width, height, gcpList) {
 
 function placeWarpedImage(entry, url, naturalW, naturalH) {
   const img = L.DomUtil.create('img', '', viewMap.getPane('overlayPane'));
+  img.referrerPolicy = 'no-referrer';
   img.src = url;
   img.style.position = 'absolute';
   img.style.left = '0'; img.style.top = '0';

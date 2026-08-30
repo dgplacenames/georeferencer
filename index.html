@@ -553,19 +553,6 @@ function rmsErrorMeters(gcps, tf) {
   }
   return Math.sqrt(sumSq / gcps.length);
 }
-// Some archives (e.g. mapywig.org) are HTTP-only. A page served over HTTPS
-// (like GitHub Pages) has browsers silently upgrade — and then fail to
-// connect to — such requests (mixed content). Routing through a free HTTPS
-// image proxy sidesteps that: the proxy does the actual HTTP fetch
-// server-side and hands the browser an HTTPS response. Only used for
-// *displaying* pixels — imageUrl/exports/Supabase keys stay the real URL.
-function displayUrl(url) {
-  if (location.protocol === 'https:' && url.startsWith('http://')) {
-    return 'https://wsrv.nl/?url=' + encodeURIComponent(url);
-  }
-  return url;
-}
-
 function uuid() {
   return crypto.randomUUID ? crypto.randomUUID() :
     'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
@@ -644,6 +631,9 @@ function loadImage() {
   if (!url) return;
   const genuinelyUnsaved = gcps.length > 0 && (!sb || hasUnsavedChanges);
   if (genuinelyUnsaved && !confirm(`Loading a new image will discard your ${gcps.length} unsaved control point${gcps.length !== 1 ? 's' : ''} for the current one. Continue?`)) return;
+  if (url.startsWith('http://') && location.protocol === 'https:') {
+    hintImg.textContent = '⚠ This is a plain-HTTP image on an HTTPS page — most browsers will block this (mixed content). See "Insecure content" in your browser\'s site settings for this page.';
+  }
   imageUrl = url;
   currentSavedVersion = null;
   hasUnsavedChanges = false;
@@ -663,7 +653,7 @@ function loadImage() {
 
   viewer = OpenSeadragon({
     element: osdEl,
-    tileSources: { type: 'image', url: displayUrl(url) },
+    tileSources: { type: 'image', url },
     showNavigationControl: false,
     animationTime: 0.2,
     visibilityRatio: 0.1,
@@ -1026,7 +1016,7 @@ function addViewerMap(name, imgUrl, width, height, gcpList) {
     setStatus('⚠ ' + name + ': image failed to load (network error or the server blocked the request)', 'err');
     updateLayerList();
   };
-  probe.src = displayUrl(imgUrl);
+  probe.src = imgUrl;
 
   updateLayerList();
 }
@@ -1034,7 +1024,7 @@ function addViewerMap(name, imgUrl, width, height, gcpList) {
 function placeWarpedImage(entry, url, naturalW, naturalH) {
   const img = L.DomUtil.create('img', '', viewMap.getPane('overlayPane'));
   img.referrerPolicy = 'no-referrer';
-  img.src = displayUrl(url);
+  img.src = url;
   img.style.position = 'absolute';
   img.style.left = '0'; img.style.top = '0';
   img.style.transformOrigin = '0 0';

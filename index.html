@@ -138,6 +138,7 @@
       <button class="tab-btn active" id="geo-base-osm" onclick="setGeoBase('osm')">OSM</button>
       <button class="tab-btn" id="geo-base-sat" onclick="setGeoBase('sat')">Satellite</button>
     </div>
+    <button onclick="centerOnUserLocation(geoMap)" title="Center the map on your current location">My Location</button>
     <div class="slider-row">Rotate image <input type="range" id="img-rotation" min="0" max="360" value="0" oninput="setImageRotation(this.value)"><span class="val" id="img-rotation-val">0°</span></div>
     <button id="btn-add" onclick="togglePlacing()" disabled>+ Add Point</button>
     <input type="file" accept=".json" id="ann-upload" style="display:none" onchange="importGcps(event)">
@@ -198,6 +199,7 @@
       <button class="tab-btn active" id="view-base-osm" onclick="setViewBase('osm')">OSM</button>
       <button class="tab-btn" id="view-base-sat" onclick="setViewBase('sat')">Satellite</button>
     </div>
+    <button onclick="centerOnUserLocation(viewMap)" title="Center the map on your current location">My Location</button>
     <div class="slider-row">Opacity <input type="range" id="opacity" min="0" max="100" value="100" oninput="setViewerOpacity(this.value)"><span class="val" id="opacity-val">100%</span></div>
     <div class="slider-row">Rotation <input type="range" id="rotation" min="0" max="360" value="0" oninput="setViewerRotation(this.value)"><span class="val" id="rotation-val">0°</span></div>
     <div class="toggle-row"><input type="checkbox" id="show-pts" onchange="renderViewerMarkers()"><label for="show-pts">Show control points</label></div>
@@ -602,7 +604,6 @@ function initGeoMap() {
   geoMarkerLayer = L.layerGroup().addTo(geoMap);
   geoMap.on('click', onGeoMapClick);
   geoMap.on('move zoom', renderGeoMapMarkers);
-  centerOnUserLocation(geoMap);
 }
 
 function centerOnUserLocation(mapInstance) {
@@ -950,13 +951,6 @@ function initViewMap() {
     maxZoom: 19, attribution: 'Tiles &copy; Esri'
   });
   viewMap.on('move zoom rotate', () => viewMaps.forEach(m => m.visible && m.reposition && m.reposition()));
-  if (navigator.geolocation) {
-    navigator.geolocation.getCurrentPosition(
-      pos => { if (!viewMaps.length) viewMap.setView([pos.coords.latitude, pos.coords.longitude], 11); },
-      () => {},
-      { timeout: 5000, maximumAge: 600000 }
-    );
-  }
 }
 function setViewBase(which) {
   document.getElementById('view-base-osm').classList.toggle('active', which === 'osm');
